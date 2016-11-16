@@ -23,41 +23,48 @@ var informationDictionary = {
     success: '520'
 };
 
-//get the cookie
-function getMainpage() {
+var base_url = "https://schuldatenbank.sachsen.de/index.php";
+
 function responseIsValid($) {
     return $('#content h2').text() !== "Es ist ein Fehler aufgetreten";
 }
+
+function scrape(url, method = 'GET', formdata) {
     return new Promise(function(fulfill, reject) {
         scraper({
-            url: 'https://schuldatenbank.sachsen.de/index.php?id=2',
+            url: url,
             type: 'html',
-            method: 'GET',
-            jar: true
+            method: method,
+            form: formdata,
+            jar:true
         }, function(err, $) {
-            if (err) reject(err);
-            else fulfill();
+            if (err) {
+              reject(err);
+            }
+            else {
+                if (responseIsValid($))
+                    fulfill($);
+                else {
+                    reject(new Error('Error detected'));
+                }
+            }
         });
     });
 }
 
+//get the cookie
+function getMainpage() {
+    return scrape(base_url + '?id=2');
+}
+
 function getSchoolpage() {
-    return new Promise(function(fulfill, reject) {
-        scraper({
-            url: 'https://schuldatenbank.sachsen.de/index.php?id=25',
-            type: 'html',
-            method: 'POST',
-            form: {
-                feld1:'01',
-                bedingung:'and',
-                feld2:'02',
-                weiter:'suchen'
-            },
-            jar: true
-        }, function(err, $) {
-            if (err) reject(err);
-            else fulfill($);
-        });
+    return scrape(base_url +'?id=25', 'POST', {
+            feld1:"01",
+            begriff1:"",
+            bedingung:"and",
+            begriff2:"",
+            feld2:"02",
+            weiter:"suchen"
     });
 }
 
@@ -88,19 +95,7 @@ function scrapeAllSchools(schools) {
 }
 
 function setActiveSchool(schooldata) {
-    return new Promise((fulfill, reject) => {
-        scraper({
-            url: 'https://schuldatenbank.sachsen.de/index.php?id=420', //+ informationDictionary.potrait,
-            type: 'html',
-            method: 'POST',
-            jar: true,
-            form: schooldata
-        }, (err, $) => {
-            console.log(schooldata);
-            if (err) reject(err);
-            else fulfill($);
-        });
-    });
+    return scrape('https://schuldatenbank.sachsen.de/index.php?id=420', 'POST', schooldata);
 }
 
 
@@ -119,73 +114,69 @@ function scrapeSchool(schooldata) {
 }
 
 function scrapePotrait(schooldata) {
-    return new Promise(function(fulfill, reject) {
-        scraper({
-            url: 'https://schuldatenbank.sachsen.de/index.php?id='+ informationDictionary.potrait,
-            type: 'html',
-            method: 'POST',
-            form: schooldata,
-            jar: true
-        }, function(err, $) {
-            if (err) reject(err);
-            else {
-                var portrait = $('.kontaktliste').find('li').get().reduce((prev, entry, index) => {
-                    var result =  $(entry).text().split(':');
-                    var key = result[0].replace(/\s/g, '_').toLowerCase();
-                    var value = result.slice(1).join(':');
-                    prev[key] = value;
-                    return prev;
-                }, {});
-                portrait['mission'] = $('#quickbar > .box li').text();
-                fulfill(portrait);
-            }
+    return scrape('https://schuldatenbank.sachsen.de/index.php?id='+ informationDictionary.potrait, 'POST', schooldata)
+        .then(function($) {
+            var portrait = $('.kontaktliste').find('li').get().reduce((prev, entry, index) => {
+                var result =  $(entry).text().split(':');
+                var key = result[0].replace(/\s/g, '_').toLowerCase();
+                var value = result.slice(1).join(':');
+                prev[key] = value;
+                return prev;
+            }, {});
+            portrait['mission'] = $('#quickbar > .box li').text();
+            return portrait;
         });
-    })
 }
 
 function scrapeStudents() {
-    return new Promise(function(fulfill, reject) {
-        var  url = 'https://schuldatenbank.sachsen.de/index.php?id=' + informationDictionary.students;
-        scraper({
-            url: url,
-            type: 'html',
-            method: 'GET',
-            jar: true
-        }, function (err, $) {
-            if (err) reject(err);
-            else {
-                var years = $('form option').get();
-                years = years.map((elem) => elem.attribs.value);
-                var tables = years.map((year) => {
-                    scraper({
-                        url:url,
-                        type: 'html',
-                        method: 'POST',
-                        form: {'jahr' : year},
-                        jar: true
-                    }, function(err, $) {
-                        var tables = $('table');
-                        var tableClasses = tables.first();
-                        var tableLanguage = tables.get(1);
-
-                        //Parse Classes Table
-                        var keyrow = tableClasses.find('tr').first();
-                        var keys = keyrow.find('td').get().map((cell) => $(cell).text().replace(/\\n/g, '').trim());
-                        var valueRows = tableClasses.find('tr').not(':first').get();
-                        var values = valueRows.map((row) => {
-                            $(row).find('td').map((cell) => $(cell).text());
+    var url = 'https://schuldatenbank.sachsen.de/index.php?id=' + informationDictionary.students;
+    return scrape(url)
+        .then(function($) {
+            var years = $('form option').get().map((elem) => elem.attribs.value);
+            var requests = years.map((year) => {
+                return scrape(url, "POST", {jahr: year})//, 'POST', {jahr : year})
+                    .then(function($) {
+                        var sections = $('#content h2').get().map((section) => {
+                            var key = $(section).text();
+                            var value = $(section).next('table').get();
+                            return {description: key, table:value};
                         });
-                        console.log(year);
-                        console.log('keys');
-                    })
-                })
-            }
+                        sections = sections.map((section) => {
+                            section.table = parseTable(section.table);
+                            return section;
+                        });
+                        return sections;
+                    });
+            });
+
+            return Promise.all(requests).then(function(tables) {
+                return tables.reduce((acc, table, index) => {
+                    acc[years[index]] = table;
+                    return acc;
+                }, {});
+            }).then(function(data) {
+                console.log(data);
+            });
         });
-    });
 }
 
-function scrapeTable(table) {
+function parseTable(table) {
+    var table = $(table);
+    var rows = table.find('tr').get();
+    var keys = $(rows[0]).find('td').get().map((cell) => $(cell).text().replace(/\\n/g, '').trim().replace(/\s/g, '_'));
+    var valueRows = rows.slice(1);
+    var values = valueRows.map((row) => {
+        return $(row).find('td').get().map((cell) => $(cell).text());
+    });
 
+    var table = values.map((row) => {
+        return row.reduce((acc, elem, index) => {
+            acc[keys[index]] = elem;
+            return acc;
+        }, {})
+    })
+    console.log(table);
+    return table;
 }
 
 function scrapeMultiValuePage(scrape) {
