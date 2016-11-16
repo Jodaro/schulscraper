@@ -25,6 +25,9 @@ var informationDictionary = {
 
 //get the cookie
 function getMainpage() {
+function responseIsValid($) {
+    return $('#content h2').text() !== "Es ist ein Fehler aufgetreten";
+}
     return new Promise(function(fulfill, reject) {
         scraper({
             url: 'https://schuldatenbank.sachsen.de/index.php?id=2',
