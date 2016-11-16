@@ -1,10 +1,11 @@
 var scrapyard = require("scrapyard");
+var $ = require('cheerio');
 
 var scraper = new scrapyard({
     debug: true,
     retries: 5,
     connections: 1,
-    cache: './storage',
+    //cache: './storage',
     bestbefore: "5min"
 });
 
