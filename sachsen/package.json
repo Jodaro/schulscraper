@@ -9,6 +9,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "jsonfile": "^2.4.0",
     "scrapyard": "^0.1.0"
   }
 }
